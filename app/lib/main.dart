@@ -221,7 +221,11 @@ class _BurritoMapPageState extends State<BurritoMapPage> {
                 ),
                 children: [
                   TileLayer(
-                    urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                    // Mapa gris claro SIN rótulos (Esri Light Gray Base).
+                    urlTemplate:
+                        'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+                    maxNativeZoom: 16,
+                    maxZoom: 19,
                     userAgentPackageName: 'pe.edu.unmsm.burrito_tracker',
                   ),
                   if (_route.isNotEmpty)
@@ -241,15 +245,36 @@ class _BurritoMapPageState extends State<BurritoMapPage> {
                           point: s.point,
                           width: 22,
                           height: 22,
-                          child: Tooltip(
-                            message: s.name,
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                shape: BoxShape.circle,
-                                border: Border.all(color: kGuinda, width: 3),
+                          child: Stack(
+                            clipBehavior: Clip.none,
+                            alignment: Alignment.center,
+                            children: [
+                              Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: kGuinda, width: 3),
+                                ),
                               ),
-                            ),
+                              Positioned(
+                                top: 24,
+                                left: -49,
+                                width: 120,
+                                child: Text(
+                                  s.name.replaceFirst('Paradero ', ''),
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                    color: kGuinda,
+                                    shadows: [
+                                      Shadow(blurRadius: 3, color: Colors.white),
+                                      Shadow(blurRadius: 3, color: Colors.white),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       if (_manualPosition != null)
@@ -263,8 +288,8 @@ class _BurritoMapPageState extends State<BurritoMapPage> {
                       if (busPoint != null)
                         Marker(
                           point: busPoint,
-                          width: 52,
-                          height: 52,
+                          width: 64,
+                          height: 40,
                           child: const _BurritoMarker(),
                         ),
                     ],
@@ -314,17 +339,57 @@ class _BurritoMarker extends StatelessWidget {
   const _BurritoMarker();
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFC107),
-        shape: BoxShape.circle,
-        border: Border.all(color: Colors.white, width: 3),
-        boxShadow: const [BoxShadow(blurRadius: 6, color: Colors.black38)],
-      ),
-      child: const Icon(Icons.directions_bus, color: kGuinda, size: 28),
-    );
+  Widget build(BuildContext context) =>
+      CustomPaint(painter: _BusPainter(), size: const Size(64, 40));
+}
+
+/// Bus naranja de diseño propio, dibujado en código (sin imágenes externas).
+class _BusPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width, h = size.height;
+    final body = Paint()..color = const Color(0xFFF26B38);
+    final dark = Paint()..color = const Color(0xFF2B3A4A);
+    final glass = Paint()..color = const Color(0xFFBFE3F5);
+
+    // sombra
+    canvas.drawOval(Rect.fromLTWH(w * 0.08, h * 0.88, w * 0.84, h * 0.12),
+        Paint()..color = Colors.black26);
+    // carrocería
+    final bodyR = RRect.fromRectAndRadius(
+        Rect.fromLTWH(0, h * 0.08, w, h * 0.72), const Radius.circular(9));
+    canvas.drawRRect(bodyR, body);
+    canvas.drawRRect(
+        bodyR,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2
+          ..color = Colors.white);
+    // franja
+    canvas.drawRect(Rect.fromLTWH(2, h * 0.52, w - 4, h * 0.07), Paint()..color = Colors.white);
+    // ventanas
+    for (var i = 0; i < 4; i++) {
+      canvas.drawRRect(
+          RRect.fromRectAndRadius(
+              Rect.fromLTWH(w * (0.07 + i * 0.185), h * 0.2, w * 0.15, h * 0.22),
+              const Radius.circular(3)),
+          glass);
+    }
+    // parabrisas
+    canvas.drawRRect(
+        RRect.fromRectAndRadius(
+            Rect.fromLTWH(w * 0.8, h * 0.2, w * 0.15, h * 0.3),
+            const Radius.circular(3)),
+        dark);
+    // ruedas
+    for (final x in [0.22, 0.72]) {
+      canvas.drawCircle(Offset(w * x, h * 0.8), h * 0.13, dark);
+      canvas.drawCircle(Offset(w * x, h * 0.8), h * 0.05, Paint()..color = Colors.white);
+    }
   }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter old) => false;
 }
 
 class _BottomPanel extends StatelessWidget {
