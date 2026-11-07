@@ -1,4 +1,4 @@
-# Where is Burrito? 🚌
+# Where is Burrito? 
 
 **Tracker en tiempo real del Burrito, el bus interno de la UNMSM, construido con reportes de los propios estudiantes.**
 
