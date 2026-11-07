@@ -1,4 +1,4 @@
-# Burrito Tracker UNMSM — Memoria compartida
+# Burrito Tracker UNMSM — Memoria compartid
 
 Tracker en tiempo real del "Burrito" (bus interno de la UNMSM) basado en reportes
 colaborativos (crowdsourcing) de estudiantes, filtrados contra trolls y suavizados
