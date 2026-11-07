@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Burrito · Modo Dios</title>
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+  <style>#map{height:100%;min-height:420px}</style>
+</head>
+<body class="bg-slate-950 text-slate-100 h-screen flex flex-col">
+  <!--
+    Panel "Modo Dios" (Rol C). Solo habla con Supabase (tablas reports / bus_state / stops).
+    Servir desde data/:   py -m http.server 5500   ->  http://localhost:5500/simulator/
+    Usa SOLO la anon/publishable key. Nunca pegues aquí la sb_secret_.
+  -->
+  <header class="px-4 py-2 border-b border-slate-800 flex flex-wrap items-center gap-3">
+    <h1 class="font-bold text-amber-400">🌯 Burrito Tracker · Modo Dios</h1>
+    <span id="conn" class="text-xs px-2 py-0.5 rounded bg-slate-800">desconectado</span>
+    <span class="text-xs text-slate-400">Loop: <b id="loopLen">–</b> m</span>
+  </header>
+
+  <main class="flex-1 grid md:grid-cols-[360px_1fr] min-h-0">
+    <aside class="p-4 space-y-4 overflow-y-auto border-r border-slate-800 text-sm">
+      <section class="space-y-2">
+        <h2 class="font-semibold text-slate-300">Conexión</h2>
+        <input id="sbUrl" class="w-full bg-slate-900 rounded px-2 py-1" value="https://ndejkvrgsovyecdtxegi.supabase.co" />
+        <input id="sbKey" class="w-full bg-slate-900 rounded px-2 py-1" value="sb_publishable_Ihzsa3SOtBvaHOyF1Mi61A_1msjs2R_" />
+        <button id="btnConnect" class="w-full bg-sky-600 hover:bg-sky-500 rounded py-1">Conectar</button>
+      </section>
+
+      <section class="space-y-2">
+        <h2 class="font-semibold text-slate-300">Inyección manual</h2>
+        <p class="text-xs text-slate-400">Click en el mapa = reporte en ese punto.</p>
+        <label class="flex items-center gap-2"><input id="isSim" type="checkbox" checked /> is_simulated</label>
+        <label class="block">report_type
+          <select id="rType" class="w-full bg-slate-900 rounded px-2 py-1">
+            <option>bus_here</option><option>on_board</option><option>bus_passed</option>
+          </select></label>
+        <label class="block">user_reputation <span id="repVal">0.8</span>
+          <input id="rep" type="range" min="0" max="1" step="0.05" value="0.8" class="w-full" /></label>
+        <button id="btnTroll" class="w-full bg-rose-700 hover:bg-rose-600 rounded py-1">😈 Ráfaga de 5 trolls</button>
+      </section>
+
+      <section class="space-y-2">
+        <h2 class="font-semibold text-slate-300">Bus fantasma (auto)</h2>
+        <label class="block">Velocidad <span id="spdVal">5</span> m/s
+          <input id="spd" type="range" min="1" max="12" step="0.5" value="5" class="w-full" /></label>
+        <label class="block">Reportes por tick <span id="nrVal">3</span>
+          <input id="nr" type="range" min="1" max="8" value="3" class="w-full" /></label>
+        <label class="block">Ruido GPS <span id="noiseVal">10</span> m
+          <input id="noise" type="range" min="0" max="40" value="10" class="w-full" /></label>
+        <label class="block">% trolls <span id="trollPctVal">15</span>%
+          <input id="trollPct" type="range" min="0" max="80" value="15" class="w-full" /></label>
+        <div class="flex gap-2">
+          <button id="btnRun" class="flex-1 bg-emerald-600 hover:bg-emerald-500 rounded py-1">▶ Iniciar</button>
+          <button id="btnWipe" class="flex-1 bg-slate-700 hover:bg-slate-600 rounded py-1">🧹 Borrar simulados</button>
+        </div>
+      </section>
+
+      <section class="space-y-1">
+        <h2 class="font-semibold text-slate-300">bus_state (Realtime)</h2>
+        <pre id="busState" class="text-xs bg-slate-900 rounded p-2 whitespace-pre-wrap">—</pre>
+      </section>
+
+      <section>
+        <h2 class="font-semibold text-slate-300">Log</h2>
+        <ul id="log" class="text-xs text-slate-400 space-y-0.5 max-h-40 overflow-y-auto"></ul>
+      </section>
+    </aside>
+    <div id="map"></div>
+  </main>
+
+<script>
+// ---------- Geo / Circuito 1D (misma lógica que backend/engine/circuit_1d.py) ----------
+const R = 6371008.8, rad = d => d * Math.PI / 180;
+function hav(lat1, lng1, lat2, lng2) {
+  const dla = rad(lat2 - lat1), dlo = rad(lng2 - lng1);
+  const h = Math.sin(dla/2)**2 + Math.cos(rad(lat1))*Math.cos(rad(lat2))*Math.sin(dlo/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+let ROUTE = [], CUM = [], LOOP = 0, STOPS = [];
+
+function buildCircuit(geo) {
+  const line = geo.features.find(f => f.geometry.type === 'LineString').geometry.coordinates;
+  ROUTE = line.map(([lng, lat]) => [lat, lng]);
+  const [a, b] = [ROUTE[0], ROUTE.at(-1)];
+  if (a[0] !== b[0] || a[1] !== b[1]) ROUTE.push(a); // cerrar loop
+  CUM = [0];
+  for (let i = 1; i < ROUTE.length; i++) CUM.push(CUM[i-1] + hav(...ROUTE[i-1], ...ROUTE[i]));
+  LOOP = CUM.at(-1);
+  STOPS = geo.features.filter(f => f.geometry.type === 'Point')
+    .map(f => ({ name: f.properties.name, lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0] }));
+}
+function project(lat, lng) {
+  const k = Math.cos(rad(lat)); let best = null;
+  for (let i = 0; i < ROUTE.length - 1; i++) {
+    const [aLat, aLng] = ROUTE[i], [bLat, bLng] = ROUTE[i+1];
+    const dx = (bLng - aLng) * k, dy = bLat - aLat;
+    let t = (((lng - aLng) * k) * dx + (lat - aLat) * dy) / (dx*dx + dy*dy);
+    t = Math.max(0, Math.min(1, t));
+    const q = [aLat + t*(bLat - aLat), aLng + t*(bLng - aLng)];
+    const off = hav(lat, lng, ...q);
+    if (!best || off < best.off) best = { off, d: CUM[i] + hav(aLat, aLng, ...q) };
+  }
+  return { distance_m: best.d % LOOP, offset_m: best.off };
+}
+function toLatLng(d) {
+  d = ((d % LOOP) + LOOP) % LOOP;
+  for (let i = 0; i < CUM.length - 1; i++) if (d <= CUM[i+1]) {
+    const t = (d - CUM[i]) / (CUM[i+1] - CUM[i] || 1);
+    return [ROUTE[i][0] + t*(ROUTE[i+1][0] - ROUTE[i][0]), ROUTE[i][1] + t*(ROUTE[i+1][1] - ROUTE[i][1])];
+  }
+  return ROUTE[0];
+}
+function jitter([lat, lng], meters) {
+  const r = meters * Math.sqrt(Math.random()), a = Math.random() * 2 * Math.PI;
+  return [lat + (r*Math.sin(a))/111320, lng + (r*Math.cos(a))/(111320*Math.cos(rad(lat)))];
+}
+
+// ---------- UI helpers ----------
+const $ = id => document.getElementById(id);
+function log(msg, cls = '') {
+  const li = document.createElement('li'); li.className = cls;
+  li.textContent = new Date().toLocaleTimeString() + ' · ' + msg;
+  $('log').prepend(li); while ($('log').children.length > 60) $('log').lastChild.remove();
+}
+[['rep','repVal'],['spd','spdVal'],['nr','nrVal'],['noise','noiseVal'],['trollPct','trollPctVal']]
+  .forEach(([i, o]) => $(i).addEventListener('input', () => $(o).textContent = $(i).value));
+
+// ---------- Mapa ----------
+const map = L.map('map').setView([-12.0572, -77.0830], 17);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 20, attribution: '© OpenStreetMap' }).addTo(map);
+const reportsLayer = L.layerGroup().addTo(map);
+const ghost = L.circleMarker([0,0], { radius: 6, color: '#a3a3a3', dashArray: '3' });
+const bus = L.marker([0,0], { icon: L.divIcon({ html: '<div style="font-size:28px">🚌</div>', className: '', iconSize: [30,30], iconAnchor: [15,15] }) });
+
+// ---------- Supabase ----------
+let sb = null, channel = null;
+function connect() {
+  sb = supabase.createClient($('sbUrl').value.trim(), $('sbKey').value.trim());
+  if (channel) sb.removeChannel(channel);
+  channel = sb.channel('godmode')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'bus_state' }, p => renderBus(p.new))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'reports' }, p => p.new?.lat && drawReport(p.new))
+    .subscribe(s => { $('conn').textContent = s; $('conn').className = 'text-xs px-2 py-0.5 rounded ' + (s === 'SUBSCRIBED' ? 'bg-emerald-700' : 'bg-slate-800'); });
+  sb.from('bus_state').select('*').eq('id', 1).maybeSingle().then(({ data, error }) => error ? log(error.message, 'text-rose-400') : data && renderBus(data));
+}
+function renderBus(s) {
+  if (!s) return;
+  bus.setLatLng([s.lat, s.lng]).addTo(map);
+  const etas = (s.etas_json || []).slice(0, 3).map(e => `  ${e.name}: ${Math.round(e.eta_s/60)} min`).join('\n');
+  $('busState').textContent =
+    `distance_m: ${s.distance_m}\nspeed: ${s.speed_mps} m/s\nconfidence: ${s.confidence_score}\nstatus: ${s.status}\n` +
+    `activos: ${s.active_reports_count} · trolls: ${s.rejected_trolls_count}\nupdated: ${s.updated_at}\nETAs:\n${etas || '  –'}`;
+}
+function drawReport(r) {
+  const color = r.is_valid === false ? '#f43f5e' : r.is_valid === true ? '#22c55e' : '#facc15';
+  const m = L.circleMarker([r.lat, r.lng], { radius: 4, color, fillOpacity: 0.8 }).addTo(reportsLayer);
+  setTimeout(() => reportsLayer.removeLayer(m), 60000);
+}
+async function sendReport(lat, lng, { troll = false, simulated = $('isSim').checked } = {}) {
+  if (!sb) return log('Conecta primero', 'text-rose-400');
+  const { distance_m } = project(lat, lng);
+  const row = {
+    user_id: (troll ? 'troll-' : 'sim-') + Math.random().toString(36).slice(2, 8),
+    report_type: $('rType').value, lat, lng, distance_m: +distance_m.toFixed(2),
+    user_reputation: troll ? +(Math.random()*0.3).toFixed(2) : +$('rep').value,
+    is_simulated: simulated,
+  };
+  const { error } = await sb.from('reports').insert(row);
+  if (error) log(error.message, 'text-rose-400');
+}
+
+// ---------- Interacciones ----------
+map.on('click', e => { sendReport(e.latlng.lat, e.latlng.lng); log(`manual @ ${project(e.latlng.lat, e.latlng.lng).distance_m.toFixed(0)} m`); });
+$('btnConnect').onclick = connect;
+$('btnTroll').onclick = () => {
+  for (let i = 0; i < 5; i++) { const [lat, lng] = jitter(toLatLng(Math.random()*LOOP), 15); sendReport(lat, lng, { troll: true }); }
+  log('5 trolls inyectados', 'text-rose-400');
+};
+let timer = null, ghostD = 0;
+$('btnRun').onclick = () => {
+  if (timer) { clearInterval(timer); timer = null; $('btnRun').textContent = '▶ Iniciar'; ghost.remove(); return; }
+  $('btnRun').textContent = '⏸ Detener'; ghost.addTo(map);
+  const TICK = 2000;
+  timer = setInterval(() => {
+    ghostD = (ghostD + (+$('spd').value) * TICK / 1000) % LOOP;
+    const p = toLatLng(ghostD); ghost.setLatLng(p);
+    for (let i = 0; i < +$('nr').value; i++) {
+      if (Math.random()*100 < +$('trollPct').value) { const [a, b] = jitter(toLatLng(Math.random()*LOOP), 20); sendReport(a, b, { troll: true, simulated: true }); }
+      else { const [a, b] = jitter(p, +$('noise').value); sendReport(a, b, { simulated: true }); }
+    }
+  }, TICK);
+};
+$('btnWipe').onclick = async () => {
+  if (!sb || !confirm('¿Borrar TODOS los reportes con is_simulated = true?')) return;
+  const { error } = await sb.from('reports').delete().eq('is_simulated', true);
+  log(error ? error.message : 'Reportes simulados borrados', error ? 'text-rose-400' : '');
+  reportsLayer.clearLayers();
+};
+
+// ---------- Boot ----------
+fetch('../route_data.json').then(r => r.json()).then(geo => {
+  buildCircuit(geo);
+  $('loopLen').textContent = LOOP.toFixed(2);
+  const pl = L.polyline(ROUTE, { color: '#f59e0b', weight: 5 }).addTo(map);
+  map.fitBounds(pl.getBounds(), { padding: [20, 20] });
+  L.circleMarker(ROUTE[0], { radius: 7, color: '#38bdf8' }).bindTooltip('Origen 0 m').addTo(map);
+  STOPS.forEach(s => L.circleMarker([s.lat, s.lng], { radius: 7, color: '#fff', fillColor: '#2563eb', fillOpacity: 1 })
+    .bindTooltip(`${s.name} · ${project(s.lat, s.lng).distance_m.toFixed(0)} m`).addTo(map));
+  connect();
+}).catch(e => log('No se pudo cargar ../route_data.json — sirve la carpeta data/ por HTTP. ' + e, 'text-rose-400'));
+</script>
+</body>
+</html>

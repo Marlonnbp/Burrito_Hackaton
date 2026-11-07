@@ -1,0 +1,24 @@
+# --- Secretos ---
+.env
+*.env*
+!.env.example
+
+# --- Python ---
+__pycache__/
+.venv/
+venv/
+
+# --- Node / Flutter / Dart ---
+node_modules/
+build/
+.dart_tool/
+
+# --- IDEs / SO ---
+.idea/
+.vscode/
+.DS_Store
+
+# --- Artefactos ---
+*.apk
+*.ipa
+*.log
