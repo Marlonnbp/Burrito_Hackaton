@@ -3,71 +3,161 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Burrito · Modo Dios</title>
+  <title>Burrito Tracker · Modo administrador</title>
   <script src="https://cdn.tailwindcss.com/3.4.16"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-  <style>#map{height:100%;min-height:420px}</style>
+  <style>
+    #map { height: 100%; min-height: 420px; }
+    body { font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif; }
+    .card { background: #0f172a; border: 1px solid #1e293b; border-radius: .75rem; padding: 1rem; }
+    .card-title { display: flex; align-items: center; gap: .5rem; font-size: .7rem; font-weight: 600;
+                  letter-spacing: .08em; text-transform: uppercase; color: #94a3b8; margin-bottom: .75rem; }
+    .card-title svg { width: 14px; height: 14px; color: #64748b; }
+    .field-label { display: block; font-size: .75rem; color: #94a3b8; margin-bottom: .25rem; }
+    .input { width: 100%; background: #020617; border: 1px solid #1e293b; border-radius: .5rem;
+             padding: .45rem .6rem; font-size: .8rem; color: #e2e8f0; outline: none; }
+    .input:focus { border-color: #38bdf8; box-shadow: 0 0 0 3px rgba(56,189,248,.15); }
+    .slider-row { display: flex; justify-content: space-between; align-items: baseline; font-size: .8rem;
+                  color: #cbd5e1; margin-bottom: .25rem; }
+    .value { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: .75rem;
+             background: #1e293b; color: #e2e8f0; padding: .05rem .45rem; border-radius: .35rem; }
+    input[type=range] { width: 100%; accent-color: #38bdf8; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: .45rem; border-radius: .5rem;
+           padding: .5rem .75rem; font-size: .8rem; font-weight: 600; transition: background-color .15s; }
+    .btn svg { width: 15px; height: 15px; }
+    .badge { display: inline-flex; align-items: center; gap: .35rem; font-size: .7rem; font-weight: 600;
+             padding: .15rem .55rem; border-radius: 999px; box-shadow: inset 0 0 0 1px currentColor; }
+    .kpi { background: #020617; border: 1px solid #1e293b; border-radius: .5rem; padding: .5rem .6rem; }
+    .kpi dt { font-size: .7rem; color: #64748b; white-space: nowrap; }
+    .kpi dd { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: .9rem;
+              color: #f1f5f9; margin-top: .1rem; }
+    aside::-webkit-scrollbar { width: 8px; } aside::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 4px; }
+  </style>
 </head>
 <body class="bg-slate-950 text-slate-100 h-screen flex flex-col">
   <!--
-    Panel "Modo Dios" (Rol C). Solo habla con Supabase (tablas reports / bus_state / stops).
+    Panel de administración (Rol C). Solo habla con Supabase (tablas reports / bus_state / stops).
     Servir desde data/:   py -m http.server 5500   ->  http://localhost:5500/simulator/
     Usa SOLO la anon/publishable key. Nunca pegues aquí la sb_secret_.
   -->
-  <header class="px-4 py-2 border-b border-slate-800 flex flex-wrap items-center gap-3">
-    <h1 class="font-bold text-amber-400">🌯 Burrito Tracker · Modo Dios</h1>
-    <span id="conn" class="text-xs px-2 py-0.5 rounded bg-slate-800">desconectado</span>
-    <span class="text-xs text-slate-400">Loop: <b id="loopLen">–</b> m</span>
+  <header class="h-14 px-5 border-b border-slate-800 bg-slate-900/80 flex items-center gap-4">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded-lg bg-[#8B1A1A] flex items-center justify-center">
+        <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" class="w-4 h-4"><rect x="4" y="3" width="16" height="14" rx="2"/><path d="M4 11h16M8 17v3M16 17v3"/><circle cx="8" cy="14" r=".5"/><circle cx="16" cy="14" r=".5"/></svg>
+      </div>
+      <div class="leading-tight">
+        <h1 class="text-sm font-semibold text-slate-100">Burrito Tracker</h1>
+        <p class="text-[11px] text-slate-400">Modo administrador</p>
+      </div>
+    </div>
+    <div class="ml-auto flex items-center gap-3 text-xs">
+      <span class="hidden sm:inline text-slate-400">Longitud del circuito <span class="value ml-1"><span id="loopLen">–</span> m</span></span>
+      <span id="conn" class="badge text-slate-400"><span class="w-1.5 h-1.5 rounded-full bg-current"></span><span id="connText">Desconectado</span></span>
+    </div>
   </header>
 
-  <main class="flex-1 grid md:grid-cols-[360px_1fr] min-h-0">
-    <aside class="p-4 space-y-4 overflow-y-auto border-r border-slate-800 text-sm">
-      <section class="space-y-2">
-        <h2 class="font-semibold text-slate-300">Conexión</h2>
-        <input id="sbUrl" class="w-full bg-slate-900 rounded px-2 py-1" value="https://ndejkvrgsovyecdtxegi.supabase.co" />
-        <input id="sbKey" class="w-full bg-slate-900 rounded px-2 py-1" value="sb_publishable_Ihzsa3SOtBvaHOyF1Mi61A_1msjs2R_" />
-        <button id="btnConnect" class="w-full bg-sky-600 hover:bg-sky-500 rounded py-1">Conectar</button>
+  <main class="flex-1 grid md:grid-cols-[380px_1fr] min-h-0">
+    <aside class="p-4 space-y-4 overflow-y-auto border-r border-slate-800 bg-slate-950 text-sm">
+
+      <!-- Conexión -->
+      <section class="card space-y-3">
+        <h2 class="card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg>Conexión a la base de datos</h2>
+        <div>
+          <label class="field-label" for="sbUrl">URL del proyecto Supabase</label>
+          <input id="sbUrl" class="input" value="https://ndejkvrgsovyecdtxegi.supabase.co" />
+        </div>
+        <div>
+          <label class="field-label" for="sbKey">Clave pública (anon)</label>
+          <input id="sbKey" class="input" value="sb_publishable_Ihzsa3SOtBvaHOyF1Mi61A_1msjs2R_" />
+        </div>
+        <button id="btnConnect" class="btn w-full bg-sky-600 hover:bg-sky-500 text-white">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 17H7A5 5 0 0 1 7 7h2M15 7h2a5 5 0 0 1 0 10h-2M8 12h8"/></svg>Conectar
+        </button>
       </section>
 
-      <section class="space-y-2">
-        <h2 class="font-semibold text-slate-300">Inyección manual</h2>
-        <p class="text-xs text-slate-400">Click en el mapa = reporte en ese punto.</p>
-        <label class="flex items-center gap-2"><input id="isSim" type="checkbox" checked /> is_simulated</label>
-        <label class="block">report_type
-          <select id="rType" class="w-full bg-slate-900 rounded px-2 py-1">
-            <option>bus_here</option><option>on_board</option><option>bus_passed</option>
-          </select></label>
-        <label class="block">user_reputation <span id="repVal">0.8</span>
-          <input id="rep" type="range" min="0" max="1" step="0.05" value="0.8" class="w-full" /></label>
-        <button id="btnTroll" class="w-full bg-rose-700 hover:bg-rose-600 rounded py-1">😈 Ráfaga de 5 trolls</button>
-      </section>
-
-      <section class="space-y-2">
-        <h2 class="font-semibold text-slate-300">Bus fantasma (auto)</h2>
-        <label class="block">Velocidad <span id="spdVal">5</span> m/s
-          <input id="spd" type="range" min="1" max="12" step="0.5" value="5" class="w-full" /></label>
-        <label class="block">Reportes por tick <span id="nrVal">3</span>
-          <input id="nr" type="range" min="1" max="8" value="3" class="w-full" /></label>
-        <label class="block">Ruido GPS <span id="noiseVal">10</span> m
-          <input id="noise" type="range" min="0" max="40" value="10" class="w-full" /></label>
-        <label class="block">% trolls <span id="trollPctVal">15</span>%
-          <input id="trollPct" type="range" min="0" max="80" value="15" class="w-full" /></label>
-        <div class="flex gap-2">
-          <button id="btnRun" class="flex-1 bg-emerald-600 hover:bg-emerald-500 rounded py-1">▶ Iniciar</button>
-          <button id="btnWipe" class="flex-1 bg-slate-700 hover:bg-slate-600 rounded py-1">🧹 Borrar simulados</button>
+      <!-- Reportes manuales y ataques -->
+      <section class="card space-y-3">
+        <h2 class="card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s7-6.2 7-12a7 7 0 0 0-14 0c0 5.8 7 12 7 12z"/><circle cx="12" cy="10" r="2.5"/></svg>Reportes manuales</h2>
+        <p class="text-xs text-slate-400 -mt-1">Haz clic en el mapa para registrar un reporte en ese punto.</p>
+        <div>
+          <label class="field-label" for="rType">Tipo de reporte</label>
+          <select id="rType" class="input">
+            <option value="bus_here">Bus avistado</option>
+            <option value="on_board">Pasajero a bordo</option>
+            <option value="bus_passed">Bus ya pasó</option>
+          </select>
+        </div>
+        <div>
+          <div class="slider-row"><label for="rep">Reputación del usuario</label><span id="repVal" class="value">0.8</span></div>
+          <input id="rep" type="range" min="0" max="1" step="0.05" value="0.8" />
+        </div>
+        <label class="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+          <input id="isSim" type="checkbox" checked class="accent-sky-500" /> Marcar como dato simulado
+        </label>
+        <div class="pt-3 border-t border-slate-800">
+          <button id="btnTroll" class="btn w-full bg-rose-600/90 hover:bg-rose-600 text-white">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4v5c0 5-3.5 8.5-8 9-4.5-.5-8-4-8-9V7z"/><path d="M12 8v5M12 16h.01"/></svg>Generar ataques falsos
+          </button>
+          <p class="text-[11px] text-slate-500 mt-1.5">Inyecta 5 reportes falsos en puntos aleatorios de la ruta para probar el filtro.</p>
         </div>
       </section>
 
-      <section class="space-y-1">
-        <h2 class="font-semibold text-slate-300">bus_state (Realtime)</h2>
-        <pre id="busState" class="text-xs bg-slate-900 rounded p-2 whitespace-pre-wrap">—</pre>
+      <!-- Simulación -->
+      <section class="card space-y-3">
+        <h2 class="card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>Simulación de recorrido</h2>
+        <div>
+          <div class="slider-row"><label for="spd">Velocidad del bus</label><span class="value"><span id="spdVal">5</span> m/s</span></div>
+          <input id="spd" type="range" min="1" max="12" step="0.5" value="5" />
+        </div>
+        <div>
+          <div class="slider-row"><label for="nr">Reportes por ciclo (2 s)</label><span id="nrVal" class="value">3</span></div>
+          <input id="nr" type="range" min="1" max="8" value="3" />
+        </div>
+        <div>
+          <div class="slider-row"><label for="noise">Error de GPS</label><span class="value"><span id="noiseVal">10</span> m</span></div>
+          <input id="noise" type="range" min="0" max="40" value="10" />
+        </div>
+        <div>
+          <div class="slider-row"><label for="trollPct">Proporción de reportes falsos</label><span class="value"><span id="trollPctVal">15</span> %</span></div>
+          <input id="trollPct" type="range" min="0" max="80" value="15" />
+        </div>
+        <div class="grid gap-2 pt-1">
+          <button id="btnRun" class="btn bg-emerald-600 hover:bg-emerald-500 text-white"></button>
+          <button id="btnWipe" class="btn bg-slate-800 hover:bg-slate-700 text-slate-200 ring-1 ring-inset ring-slate-700">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>Limpiar reportes simulados
+          </button>
+        </div>
       </section>
 
-      <section>
-        <h2 class="font-semibold text-slate-300">Log</h2>
-        <ul id="log" class="text-xs text-slate-400 space-y-0.5 max-h-40 overflow-y-auto"></ul>
+      <!-- Estado del bus -->
+      <section class="card">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="card-title !mb-0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg>Estado del bus · tiempo real</h2>
+          <span id="stStatus" class="badge text-slate-400">Sin datos</span>
+        </div>
+        <dl class="grid grid-cols-2 gap-2">
+          <div class="kpi"><dt>Posición en ruta</dt><dd id="stDist">—</dd></div>
+          <div class="kpi"><dt>Velocidad</dt><dd id="stSpeed">—</dd></div>
+          <div class="kpi"><dt>Reportes válidos</dt><dd id="stValid">—</dd></div>
+          <div class="kpi"><dt>Reportes descartados</dt><dd id="stRejected">—</dd></div>
+        </dl>
+        <div class="mt-3">
+          <div class="slider-row text-xs"><span class="text-slate-400">Confianza de la estimación</span><span id="stConf" class="value">—</span></div>
+          <div class="h-1.5 rounded-full bg-slate-800 overflow-hidden"><div id="stConfBar" class="h-full bg-sky-500 transition-all" style="width:0%"></div></div>
+        </div>
+        <div class="mt-3">
+          <p class="text-[11px] uppercase tracking-wider text-slate-500 mb-1.5">Próximas llegadas</p>
+          <ul id="stEtas" class="divide-y divide-slate-800 text-xs"><li class="py-1.5 text-slate-500">—</li></ul>
+        </div>
+        <p class="text-[11px] text-slate-500 mt-3">Última actualización: <span id="stUpdated">—</span></p>
+      </section>
+
+      <!-- Registro -->
+      <section class="card">
+        <h2 class="card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>Registro de eventos</h2>
+        <ul id="log" class="text-xs text-slate-400 space-y-1 max-h-44 overflow-y-auto font-mono"></ul>
       </section>
     </aside>
     <div id="map"></div>
@@ -124,15 +214,43 @@ function jitter([lat, lng], meters) {
 const $ = id => document.getElementById(id);
 function log(msg, cls = '') {
   const li = document.createElement('li'); li.className = cls;
-  li.textContent = new Date().toLocaleTimeString() + ' · ' + msg;
+  li.textContent = new Date().toLocaleTimeString() + '  ' + msg;
   $('log').prepend(li); while ($('log').children.length > 60) $('log').lastChild.remove();
 }
 [['rep','repVal'],['spd','spdVal'],['nr','nrVal'],['noise','noiseVal'],['trollPct','trollPctVal']]
   .forEach(([i, o]) => $(i).addEventListener('input', () => $(o).textContent = $(i).value));
 
+// Botón de simulación (solo presentación)
+const ICON_PLAY = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5v14l11-7z"/></svg>';
+const ICON_STOP = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>';
+function setRunButton(running) {
+  $('btnRun').innerHTML = (running ? ICON_STOP + 'Detener' : ICON_PLAY + 'Iniciar simulación');
+  $('btnRun').className = 'btn text-white ' + (running ? 'bg-amber-600 hover:bg-amber-500' : 'bg-emerald-600 hover:bg-emerald-500');
+}
+setRunButton(false);
+
+// Estado de conexión (solo presentación)
+const CONN = {
+  SUBSCRIBED: ['Conectado', 'text-emerald-400'],
+  CHANNEL_ERROR: ['Error de conexión', 'text-rose-400'],
+  TIMED_OUT: ['Tiempo de espera agotado', 'text-amber-400'],
+  CLOSED: ['Desconectado', 'text-slate-400'],
+};
+function setConn(s) {
+  const [label, cls] = CONN[s] || [s, 'text-slate-400'];
+  $('connText').textContent = label;
+  $('conn').className = 'badge ' + cls;
+}
+
 // ---------- Mapa ----------
 const map = L.map('map').setView([-12.0572, -77.0830], 17);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 20, attribution: '© OpenStreetMap' }).addTo(map);
+// Tailwind (CDN) aplica el layout después de crear el mapa: recalcular tamaño al cambiar.
+let routeBounds = null, fitted = false;
+new ResizeObserver(() => {
+  map.invalidateSize();
+  if (routeBounds && !fitted) { map.fitBounds(routeBounds, { padding: [20, 20] }); fitted = true; }
+}).observe($('map'));
 const reportsLayer = L.layerGroup().addTo(map);
 const ghost = L.circleMarker([0,0], { radius: 6, color: '#a3a3a3', dashArray: '3' });
 const bus = L.marker([0,0], { icon: L.divIcon({ html: '<div style="font-size:28px">🚌</div>', className: '', iconSize: [30,30], iconAnchor: [15,15] }) });
@@ -145,16 +263,41 @@ function connect() {
   channel = sb.channel('godmode')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'bus_state' }, p => renderBus(p.new))
     .on('postgres_changes', { event: '*', schema: 'public', table: 'reports' }, p => p.new?.lat && drawReport(p.new))
-    .subscribe(s => { $('conn').textContent = s; $('conn').className = 'text-xs px-2 py-0.5 rounded ' + (s === 'SUBSCRIBED' ? 'bg-emerald-700' : 'bg-slate-800'); });
+    .subscribe(s => setConn(s));
   sb.from('bus_state').select('*').eq('id', 1).maybeSingle().then(({ data, error }) => error ? log(error.message, 'text-rose-400') : data && renderBus(data));
 }
+
+const STATUS = {
+  moving:  ['En movimiento',       'text-emerald-400'],
+  stopped: ['Detenido',            'text-amber-400'],
+  stale:   ['Sin datos recientes', 'text-rose-400'],
+  unknown: ['Sin datos',           'text-slate-400'],
+};
 function renderBus(s) {
   if (!s) return;
   bus.setLatLng([s.lat, s.lng]).addTo(map);
-  const etas = (s.etas_json || []).slice(0, 3).map(e => `  ${e.name}: ${Math.round(e.eta_s/60)} min`).join('\n');
-  $('busState').textContent =
-    `distance_m: ${s.distance_m}\nspeed: ${s.speed_mps} m/s\nconfidence: ${s.confidence_score}\nstatus: ${s.status}\n` +
-    `activos: ${s.active_reports_count} · trolls: ${s.rejected_trolls_count}\nupdated: ${s.updated_at}\nETAs:\n${etas || '  –'}`;
+
+  const [label, cls] = STATUS[s.status] || [s.status ?? 'Sin datos', 'text-slate-400'];
+  $('stStatus').textContent = label;
+  $('stStatus').className = 'badge ' + cls;
+  $('stDist').textContent = s.distance_m != null ? `${(+s.distance_m).toFixed(0)} m` : '—';
+  $('stSpeed').textContent = s.speed_mps != null ? `${Math.max(0, s.speed_mps * 3.6).toFixed(1)} km/h` : '—';
+  $('stValid').textContent = s.active_reports_count ?? '—';
+  $('stRejected').textContent = s.rejected_trolls_count ?? '—';
+  const conf = Math.round((s.confidence_score ?? 0) * 100);
+  $('stConf').textContent = conf + ' %';
+  $('stConfBar').style.width = conf + '%';
+  $('stUpdated').textContent = s.updated_at ? new Date(s.updated_at).toLocaleTimeString() : '—';
+
+  const ul = $('stEtas'); ul.replaceChildren();
+  const etas = (s.etas_json || []).slice(0, 3);
+  if (!etas.length) { const li = document.createElement('li'); li.className = 'py-1.5 text-slate-500'; li.textContent = '—'; ul.append(li); }
+  etas.forEach(e => {
+    const li = document.createElement('li'); li.className = 'py-1.5 flex justify-between';
+    const n = document.createElement('span'); n.className = 'text-slate-300'; n.textContent = String(e.name).replace(/^Paradero\s+/, '');
+    const t = document.createElement('span'); t.className = 'value'; t.textContent = e.eta_s < 60 ? '< 1 min' : `${Math.round(e.eta_s / 60)} min`;
+    li.append(n, t); ul.append(li);
+  });
 }
 function drawReport(r) {
   const color = r.is_valid === false ? '#f43f5e' : r.is_valid === true ? '#22c55e' : '#facc15';
@@ -162,7 +305,7 @@ function drawReport(r) {
   setTimeout(() => reportsLayer.removeLayer(m), 60000);
 }
 async function sendReport(lat, lng, { troll = false, simulated = $('isSim').checked } = {}) {
-  if (!sb) return log('Conecta primero', 'text-rose-400');
+  if (!sb) return log('Primero conecta con la base de datos', 'text-rose-400');
   const { distance_m } = project(lat, lng);
   const row = {
     user_id: (troll ? 'troll-' : 'sim-') + Math.random().toString(36).slice(2, 8),
@@ -175,16 +318,16 @@ async function sendReport(lat, lng, { troll = false, simulated = $('isSim').chec
 }
 
 // ---------- Interacciones ----------
-map.on('click', e => { sendReport(e.latlng.lat, e.latlng.lng); log(`manual @ ${project(e.latlng.lat, e.latlng.lng).distance_m.toFixed(0)} m`); });
+map.on('click', e => { sendReport(e.latlng.lat, e.latlng.lng); log(`Reporte manual · ${project(e.latlng.lat, e.latlng.lng).distance_m.toFixed(0)} m`); });
 $('btnConnect').onclick = connect;
 $('btnTroll').onclick = () => {
   for (let i = 0; i < 5; i++) { const [lat, lng] = jitter(toLatLng(Math.random()*LOOP), 15); sendReport(lat, lng, { troll: true }); }
-  log('5 trolls inyectados', 'text-rose-400');
+  log('5 reportes falsos generados', 'text-rose-400');
 };
 let timer = null, ghostD = 0;
 $('btnRun').onclick = () => {
-  if (timer) { clearInterval(timer); timer = null; $('btnRun').textContent = '▶ Iniciar'; ghost.remove(); return; }
-  $('btnRun').textContent = '⏸ Detener'; ghost.addTo(map);
+  if (timer) { clearInterval(timer); timer = null; setRunButton(false); ghost.remove(); log('Simulación detenida'); return; }
+  setRunButton(true); ghost.addTo(map); log('Simulación iniciada', 'text-emerald-400');
   const TICK = 2000;
   timer = setInterval(() => {
     ghostD = (ghostD + (+$('spd').value) * TICK / 1000) % LOOP;
@@ -196,9 +339,9 @@ $('btnRun').onclick = () => {
   }, TICK);
 };
 $('btnWipe').onclick = async () => {
-  if (!sb || !confirm('¿Borrar TODOS los reportes con is_simulated = true?')) return;
+  if (!sb || !confirm('¿Eliminar todos los reportes marcados como simulados?')) return;
   const { error } = await sb.from('reports').delete().eq('is_simulated', true);
-  log(error ? error.message : 'Reportes simulados borrados', error ? 'text-rose-400' : '');
+  log(error ? error.message : 'Reportes simulados eliminados', error ? 'text-rose-400' : '');
   reportsLayer.clearLayers();
 };
 
@@ -207,7 +350,9 @@ fetch('../route_data.json').then(r => r.json()).then(geo => {
   buildCircuit(geo);
   $('loopLen').textContent = LOOP.toFixed(2);
   const pl = L.polyline(ROUTE, { color: '#f59e0b', weight: 5 }).addTo(map);
-  map.fitBounds(pl.getBounds(), { padding: [20, 20] });
+  routeBounds = pl.getBounds();
+  map.invalidateSize();
+  map.fitBounds(routeBounds, { padding: [20, 20] });
   L.circleMarker(ROUTE[0], { radius: 7, color: '#38bdf8' }).bindTooltip('Origen 0 m').addTo(map);
   STOPS.forEach(s => L.circleMarker([s.lat, s.lng], { radius: 7, color: '#fff', fillColor: '#2563eb', fillOpacity: 1 })
     .bindTooltip(`${s.name} · ${project(s.lat, s.lng).distance_m.toFixed(0)} m`).addTo(map));
