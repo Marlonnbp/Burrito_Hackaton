@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import os
 import time
 from contextlib import asynccontextmanager
@@ -29,6 +30,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 TICK_S = float(os.getenv("TICK_S", "2"))
 WINDOW_S = int(os.getenv("REPORT_WINDOW_S", "90"))
 STALE_S = 120
+RECENCY_TAU_S = float(os.getenv("RECENCY_TAU_S", "15"))  # peso de un reporte = rep · e^(-edad/τ)
 
 circuit = get_circuit()
 kalman = Kalman1D(circuit.length_m)
@@ -38,6 +40,49 @@ state: dict = {"last_tick": None, "last_fix": None, "stops": circuit.stops, "rej
 
 def supabase() -> Client:
     return create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_ROLE_KEY"])
+
+
+def _age_s(created_at: str | None, now: float) -> float:
+    """Segundos desde created_at (ISO de Supabase); 0 si no se puede leer."""
+    try:
+        return max(0.0, now - datetime.fromisoformat(created_at).timestamp())
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def aligned_center(rows: list[dict], mask: list[bool], now: float, ref_m: float,
+                   max_speed: float = 12.0) -> float | None:
+    """Posición ACTUAL estimada a partir de los reportes válidos.
+
+    El promedio simple de una ventana de 90 s queda ~45 s detrás de un bus en
+    movimiento. Aquí se ajusta una recta distancia-vs-tiempo (mínimos cuadrados
+    ponderados, recientes pesan más) y se evalúa en "ahora". La velocidad sale
+    de los propios reportes (no del Kalman) para evitar retroalimentación.
+    `ref_m` (centro del cluster) sirve para desenrollar el loop.
+    """
+    L = circuit.length_m
+    pts = []  # (t, d_rel, w), t <= 0 = segundos hacia atrás
+    for r, ok in zip(rows, mask):
+        if not ok:
+            continue
+        age = _age_s(r.get("created_at"), now)
+        w = (r.get("user_reputation") or 0.5) * math.exp(-age / RECENCY_TAU_S)
+        d_rel = (r["distance_m"] - ref_m + L / 2) % L - L / 2
+        pts.append((-age, d_rel, w))
+    sw = sum(w for _, _, w in pts)
+    if sw <= 0:
+        return None
+    # Evaluar en "ahora", pero sin extrapolar más de 5 s tras el último reporte
+    # (si dejan de llegar reportes, el bus no sigue avanzando sin datos).
+    t_eval = min(0.0, max(t for t, _, _ in pts) + 5.0)
+    t_m = sum(w * t for t, _, w in pts) / sw
+    d_m = sum(w * d for _, d, w in pts) / sw
+    var_t = sum(w * (t - t_m) ** 2 for t, _, w in pts) / sw
+    slope = 0.0
+    if len(pts) >= 3 and var_t > 4.0:  # al menos unos segundos de historia
+        cov = sum(w * (t - t_m) * (d - d_m) for t, d, w in pts) / sw
+        slope = min(max(cov / var_t, 0.0), max_speed)  # el bus solo avanza
+    return (ref_m + d_m + slope * (t_eval - t_m)) % L
 
 
 def tick(sb: Client) -> dict:
@@ -68,7 +113,9 @@ def tick(sb: Client) -> dict:
                 state["rejected_total"] += 1
 
     if res.center_m is not None:
-        kalman.update(res.center_m, meas_std=max(10.0, 40.0 * (1 - res.confidence)))
+        z = aligned_center(rows, res.valid_mask, now, res.center_m)
+        kalman.update(res.center_m if z is None else z,
+                      meas_std=max(10.0, 40.0 * (1 - res.confidence)))
         state["last_fix"] = now
 
     age = now - state["last_fix"] if state["last_fix"] else None
